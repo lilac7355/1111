@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>員工請假代理人查找系統 (行動版優化)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 確保字體在手機上清晰 */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        /* 針對行動裝置，確保 Select 和 Input 元素有足夠的高度在手機上點擊 */
+        .p-3 {
+            padding: 0.75rem; /* 增加點擊區域 */
+        }
+    </style>
+</head>
+<body class="min-h-screen p-2 sm:p-4 md:p-6 bg-gray-50">
+
+    <div class="max-w-xl mx-auto bg-white shadow-lg rounded-xl overflow-hidden">
+        
+        <header class="bg-indigo-600 p-4 text-white">
+            <h1 class="text-xl font-bold">代理人手動選擇系統</h1>
+            <p class="text-indigo-200 text-sm mt-1">請輸入請假資訊，並從候選名單中選擇代理人。</p>
+        </header>
+
+        <main class="p-4 space-y-4">
+            
+            <div id="result-box" class="min-h-[80px] p-3 border rounded-lg bg-yellow-50 border-yellow-300 text-gray-700 text-sm">
+                <p class="font-semibold text-yellow-700">🔍 請填寫上方欄位後，點擊「查找代理人」按鈕。</p>
+            </div>
+
+            <form id="proxy-form" class="space-y-4">
+                
+                <div>
+                    <label for="employeeId" class="block text-sm font-medium text-gray-700 mb-1">
+                        請假員工姓名 (ID)
+                    </label>
+                    <select id="employeeId" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150" required>
+                        <option value="" disabled selected>請選擇請假員工...</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="leaveType" class="block text-sm font-medium text-gray-700 mb-1">
+                        假別選擇
+                    </label>
+                    <select id="leaveType" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150" required>
+                        <option value="" disabled selected>請選擇假別...</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label for="startDate" class="block text-sm font-medium text-gray-700 mb-1">
+                            開始日期
+                        </label>
+                        <input type="date" id="startDate" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150" required>
+                    </div>
+
+                    <div>
+                        <label for="endDate" class="block text-sm font-medium text-gray-700 mb-1">
+                            結束日期
+                        </label>
+                        <input type="date" id="endDate" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150" required>
+                    </div>
+                </div>
+
+                <button type="button" id="searchButton" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-200 focus:outline-none focus:ring-4 focus:ring-indigo-300">
+                    查找代理人
+                </button>
+            </form>
+            
+            <div id="selection-area" class="hidden space-y-4 pt-4 border-t border-gray-100">
+                <div>
+                    <label for="substituteSelect" class="block text-sm font-medium text-gray-700 mb-1 font-bold">
+                        第二步：從可用名單中選擇最終代理人
+                    </label>
+                    <select id="substituteSelect" class="w-full p-3 border border-indigo-500 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150" required>
+                        <option value="" disabled selected>請選擇一位代理人...</option>
+                    </select>
+                </div>
+                <button type="button" id="confirmButton" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-200 focus:outline-none focus:ring-4 focus:ring-green-300">
+                    確認選擇這位代理人
+                </button>
+            </div>
+
+            <div id="active-leaves-area" class="mt-6 pt-4 border-t border-gray-100">
+                <h3 class="text-base font-bold text-gray-800 mb-2">📅 當前休假人員與代理人職責</h3>
+                <ul id="active-leaves-list" class="space-y-2 text-xs">
+                    <li class="text-gray-500">正在載入請假資訊...</li>
+                </ul>
+            </div>
+            
+            <div class="pt-4 border-t border-gray-100 mt-6">
+                <p class="text-xs text-gray-400">
+                    **衝突檢查：** 只有當代理人不在請求的日期範圍內休假時，才會出現在名單中。
+                </p>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- 核心資料定義 (Data Definition) ---
+        const LEAVE_TYPES = [
+            "休假 (Annual Leave)",
+            "病假 (Sick Leave)",
+            "事假 (Personal Leave)",
+            "喪假 (Bereavement Leave)",
+            "身心調適假 (Mental Health Leave)"
+        ];
+
+        const SPECIAL_AGENT_A_ID = "E001"; // 許明祥
+        const SPECIAL_AGENT_B_ID = "E003"; // 呂信忠
+
+        const employeeData = [
+            {"id": "E001", "name": "許明祥"}, 
+            {"id": "E002", "name": "王子源"},
+            {"id": "E003", "name": "呂信忠"},
+            {"id": "E004", "name": "吳欣峰"},
+            {"id": "E005", "name": "許景翔"},
+            {"id": "E006", "name": "劉訓宏"},
+            {"id": "E007", "name": "許釋晟"},
+            {"id": "E008", "name": "許宗文"},
+            {"id": "E009", "name": "劉柏榕"},
+            {"id": "E010", "name": "楊焜淵"},
+            {"id": "E011", "name": "謝傑儒"},
+            {"id": "E012", "name": "蘇俊瑋"},
+        ];
+
+        // 活躍請假記錄 (模擬資料庫中已有的休假安排)
+        const activeLeaves = []; 
+
+        // --- 核心邏輯函數 (Core Logic Functions) ---
+
+        /** 檢查潛在代理人是否在請求的日期範圍內已安排休假 */
+        function isAvailable(employeeId, startDateStr, endDateStr, leaves) {
+            const reqStart = Date.parse(startDateStr);
+            const reqEnd = Date.parse(endDateStr);
+
+            if (isNaN(reqStart) || isNaN(reqEnd) || reqStart > reqEnd) {
+                return true; 
+            }
+
+            for (const leave of leaves) {
+                if (leave.id === employeeId) {
+                    const leaveStart = Date.parse(leave.start);
+                    const leaveEnd = Date.parse(leave.end);
+
+                    if (reqStart <= leaveEnd && reqEnd >= leaveStart) {
+                        return false; 
+                    }
+                }
+            }
+            return true; 
+        }
+
+        /** 尋找並返回所有可用的代理人名單 (按優先級排序)。 */
+        function getAvailableCandidates(employeeIdToFind, data, startDate, endDate, activeLeaves) {
+            const leavingEmployee = data.find(emp => emp.id === employeeIdToFind);
+            const header = `${leavingEmployee.name} (${leavingEmployee.id}) 請假 (${startDate} 至 ${endDate})`;
+            const candidates = [];
+
+            // 1. 處理特殊代理規則 (互為指定代理)
+            if (employeeIdToFind === SPECIAL_AGENT_A_ID) { 
+                if (isAvailable(SPECIAL_AGENT_B_ID, startDate, endDate, activeLeaves)) {
+                    const substitute = data.find(emp => emp.id === SPECIAL_AGENT_B_ID);
+                    substitute.type = '指定代理人';
+                    candidates.push(substitute);
+                    return { header, candidates }; 
+                } else {
+                    return { header, candidates: null, error: "錯誤：許明祥的指定代理人呂信忠在該日期範圍內正在休假。" };
+                }
+            } else if (employeeIdToFind === SPECIAL_AGENT_B_ID) { 
+                if (isAvailable(SPECIAL_AGENT_A_ID, startDate, endDate, activeLeaves)) {
+                    const substitute = data.find(emp => emp.id === SPECIAL_AGENT_A_ID);
+                    substitute.type = '指定代理人';
+                    candidates.push(substitute);
+                    return { header, candidates }; 
+                } else {
+                    return { header, candidates: null, error: "錯誤：呂信忠的指定代理人許明祥在該日期範圍內正在休假。" };
+                }
+            }
+
+            // 2. 處理其他員工的代理規則 (特權優先)
+            for (const specialId of [SPECIAL_AGENT_A_ID, SPECIAL_AGENT_B_ID]) {
+                if (isAvailable(specialId, startDate, endDate, activeLeaves)) {
+                    const specialAgent = data.find(emp => emp.id === specialId);
+                    candidates.push({...specialAgent, type: '特權代理人 (高階)'});  
+                }
+            }
+            
+            // 3. 尋找所有其他可用的普通員工
+            data.forEach(emp => {
+                const isSelf = emp.id === employeeIdToFind;
+                const isSpecialAgent = emp.id === SPECIAL_AGENT_A_ID || emp.id === SPECIAL_AGENT_B_ID;
+                
+                if (!isSelf && !isSpecialAgent && isAvailable(emp.id, startDate, endDate, activeLeaves)) {
+                    if (!candidates.some(c => c.id === emp.id)) { 
+                        candidates.push({...emp, type: '一般候補員工'});
+                    }
+                }
+            });
+
+            if (candidates.length === 0) {
+                 return { header, candidates: null, error: "找不到任何可用的代理人 (所有員工在該日期都已休假)。" };
+            }
+
+            return { header, candidates };
+        }
+
+        /** 處理取消請假的邏輯 */
+        function cancelLeave(leaveKey) {
+            const [employeeId, startDate] = leaveKey.split('|');
+
+            const indexToRemove = activeLeaves.findIndex(leave => 
+                leave.id === employeeId && leave.start === startDate
+            );
+
+            if (indexToRemove > -1) {
+                activeLeaves.splice(indexToRemove, 1);
+                displayActiveLeaves(); 
+                renderResult('success', '請假已取消', `員工 ${getEmployeeNameById(employeeId)} (${employeeId}) 從 ${startDate} 開始的請假記錄已成功取消。`);
+            } else {
+                renderResult('error', '取消失敗', '找不到對應的請假記錄。');
+            }
+        }
+
+
+        // --- UI 處理邏輯 (UI Logic) ---
+        const employeeSelect = document.getElementById('employeeId');
+        const leaveSelect = document.getElementById('leaveType');
+        const startDateInput = document.getElementById('startDate');
+        const endDateInput = document.getElementById('endDate');
+        const searchButton = document.getElementById('searchButton');
+        const confirmButton = document.getElementById('confirmButton');
+        const resultBox = document.getElementById('result-box');
+        const selectionArea = document.getElementById('selection-area');
+        const substituteSelect = document.getElementById('substituteSelect');
+        const activeLeavesList = document.getElementById('active-leaves-list'); 
+
+        
+        let currentQueryInfo = {};
+
+        function getEmployeeNameById(id) {
+            const employee = employeeData.find(emp => emp.id === id);
+            return employee ? employee.name : id;
+        }
+
+        // 填充下拉選單
+        function populateSelectors() {
+            employeeData.forEach(emp => {
+                const option = document.createElement('option');
+                option.value = emp.id;
+                option.textContent = `${emp.name} (${emp.id})`; 
+                employeeSelect.appendChild(option);
+            });
+
+            LEAVE_TYPES.forEach(type => {
+                const option = document.createElement('option');
+                option.value = type;
+                option.textContent = type;
+                leaveSelect.appendChild(option);
+            });
+        }
+
+        // 顯示當前休假人員與代理人列表
+        function displayActiveLeaves() {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); 
+
+            const filteredLeaves = activeLeaves.filter(leave => {
+                const [year, month, day] = leave.end.split('-').map(Number);
+                const leaveEndDate = new Date(Date.UTC(year, month - 1, day)); 
+                const todayUTC = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+
+                return leaveEndDate.getTime() >= todayUTC.getTime();
+            });
+
+
+            if (filteredLeaves.length === 0) {
+                activeLeavesList.innerHTML = '<li class="text-gray-500 p-2 border border-gray-200 rounded-lg">目前沒有員工在休假中。</li>';
+                return;
+            }
+
+            const listItems = filteredLeaves.map(leave => { 
+                const name = getEmployeeNameById(leave.id);
+                const proxyName = getEmployeeNameById(leave.proxyId); 
+
+                const leaveKey = `${leave.id}|${leave.start}`;
+
+                return `<li class="p-2 bg-gray-50 rounded-lg border border-gray-200 shadow-sm flex justify-between items-center">
+                            <div>
+                                <div class="font-semibold text-indigo-700">${name} (${leave.id})</div>
+                                <div class="mt-0.5 ml-2 text-xs text-gray-600">
+                                    期間：<span class="text-red-600 font-medium">${leave.start}</span> ~ <span class="text-red-600 font-medium">${leave.end}</span>
+                                </div>
+                                <div class="mt-0.5 ml-2 text-xs text-gray-600">
+                                    代理人：<span class="text-green-600 font-medium">${proxyName} (${leave.proxyId})</span>
+                                </div>
+                            </div>
+                            <button type="button" 
+                                    class="cancel-leave-btn bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-1 px-2 rounded-lg transition duration-150"
+                                    data-leave-key="${leaveKey}">
+                                取消
+                            </button>
+                        </li>`;
+            }).join('');
+
+            activeLeavesList.innerHTML = listItems;
+        }
+
+        // 渲染結果到UI
+        function renderResult(status, header, message) {
+            let bgColor = 'bg-yellow-50';
+            let borderColor = 'border-yellow-300';
+            let textColor = 'text-gray-700';
+            let icon = '🔍';
+
+            if (status === 'success') {
+                bgColor = 'bg-green-50';
+                borderColor = 'border-green-300';
+                textColor = 'text-green-800';
+                icon = '✅';
+            } else if (status === 'fail' || status === 'error') {
+                bgColor = 'bg-red-50';
+                borderColor = 'border-red-300';
+                textColor = 'text-red-800';
+                icon = '❌';
+            } else if (status === 'pending') {
+                bgColor = 'bg-blue-50';
+                borderColor = 'border-blue-300';
+                textColor = 'text-blue-800';
+                icon = '📝';
+            }
+
+            let formattedMessage = message.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+
+            let html = `<div class="font-bold text-base mb-1 ${textColor}">${icon} ${header || '系統訊息'}</div>`;
+            html += `<p class="text-sm">${formattedMessage}</p>`;
+            
+            resultBox.className = `min-h-[80px] p-3 border rounded-lg ${bgColor} ${borderColor} ${textColor}`;
+            resultBox.innerHTML = html;
+        }
+
+        // --- 階段 1: 查找候選人 ---
+        searchButton.addEventListener('click', () => {
+            const employeeId = employeeSelect.value;
+            const leaveType = leaveSelect.value;
+            const startDate = startDateInput.value;
+            const endDate = endDateInput.value;
+
+            selectionArea.classList.add('hidden');
+
+            if (!employeeId || !leaveType || !startDate || !endDate) {
+                renderResult('error', '輸入錯誤', '請填寫所有欄位。');
+                return;
+            }
+
+            if (Date.parse(startDate) > Date.parse(endDate)) {
+                renderResult('error', '日期無效', '開始日期不能晚於結束日期。');
+                return;
+            }
+
+            const result = getAvailableCandidates(employeeId, employeeData, startDate, endDate, activeLeaves);
+            
+            currentQueryInfo = { employeeId, leaveType, startDate, endDate, header: result.header };
+
+            if (result.error) {
+                renderResult('fail', result.header, result.error);
+                return;
+            }
+            
+            substituteSelect.innerHTML = '<option value="" disabled selected>請選擇一位代理人...</option>';
+            
+            result.candidates.forEach(candidate => {
+                const option = document.createElement('option');
+                option.value = candidate.id;
+                option.textContent = `${candidate.name} (${candidate.id}) - ${candidate.type}`;
+                substituteSelect.appendChild(option);
+            });
+
+            selectionArea.classList.remove('hidden');
+            renderResult('pending', result.header, `✅ 成功找到 ${result.candidates.length} 位可用代理人。請從下方的選單中選擇一位。`);
+        });
+
+        // --- 階段 2: 確認最終選擇 ---
+        confirmButton.addEventListener('click', () => {
+            const selectedAgentId = substituteSelect.value;
+
+            if (!selectedAgentId) {
+                renderResult('error', currentQueryInfo.header, '請先從下拉式選單中選擇一位代理人！');
+                return;
+            }
+
+            const selectedAgent = employeeData.find(emp => emp.id === selectedAgentId);
+            const originalEmployee = employeeData.find(emp => emp.id === currentQueryInfo.employeeId);
+            
+            const isSpecialAssignment = 
+                (currentQueryInfo.employeeId === SPECIAL_AGENT_A_ID && selectedAgentId === SPECIAL_AGENT_B_ID) ||
+                (currentQueryInfo.employeeId === SPECIAL_AGENT_B_ID && selectedAgentId === SPECIAL_AGENT_A_ID);
+            
+            let message = '';
+
+            if (isSpecialAssignment) {
+                 message = `**職務代理人：** ${selectedAgent.name} （ID: ${selectedAgent.id}） **已根據特殊規則指定。**`;
+            } else if (selectedAgentId === SPECIAL_AGENT_A_ID || selectedAgentId === SPECIAL_AGENT_B_ID) {
+                 message = `**職務代理人：** ${selectedAgent.name} （ID: ${selectedAgent.id}） **已指定為特權代理人。**`;
+            } else {
+                 message = `**職務代理人：** ${selectedAgent.name} （ID: ${selectedAgent.id}） **已指定為候補代理人。**`;
+            }
+
+            renderResult('success', 
+                `${originalEmployee.name} (${originalEmployee.id}) 請【${currentQueryInfo.leaveType}】確認結果`,
+                message + `<br>請假區間：${currentQueryInfo.startDate} 至 ${currentQueryInfo.endDate}`
+            );
+
+            // 將確認的請假記錄添加到 activeLeaves 列表中
+            const newLeave = {
+                id: currentQueryInfo.employeeId,
+                start: currentQueryInfo.startDate,
+                end: currentQueryInfo.endDate,
+                proxyId: selectedAgentId,
+            };
+
+            activeLeaves.push(newLeave);
+
+            displayActiveLeaves(); 
+
+            selectionArea.classList.add('hidden');
+        });
+
+        // --- 取消請假按鈕的事件委派 ---
+        activeLeavesList.addEventListener('click', (event) => {
+            const button = event.target.closest('.cancel-leave-btn');
+            if (button) {
+                const leaveKey = button.dataset.leaveKey;
+                if (leaveKey) {
+                    cancelLeave(leaveKey);
+                }
+            }
+        });
+
+        // 初始化
+        populateSelectors();
+        displayActiveLeaves(); 
+    </script>
+</body>
+</html>
